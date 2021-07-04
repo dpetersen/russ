@@ -1,27 +1,33 @@
+use anyhow::Error;
 use rss::Channel;
-use std::error::Error;
 
 #[tokio::main]
 pub async fn main() {
-    let channel = get_channel().await.unwrap();
-    println!(
-        "Got channel {}\n{}\n---------------",
-        channel.title, channel.description
-    );
-    for item in channel.items {
-        println!(
-            "Title: {}\nDescription:\n{}\n---------------",
-            item.title.unwrap_or("N/A".to_string()),
-            item.description.unwrap_or("N/A".to_string()),
-        );
+    let feed_urls = vec![
+        "https://www.nasa.gov/rss/dyn/breaking_news.rss".to_string(),
+        "https://rss.art19.com/apology-line".to_string(),
+    ];
+
+    let channel_futs: Vec<_> = feed_urls
+        .iter()
+        .map(|feed_url| get_channel(feed_url.clone()))
+        .collect();
+
+    for channel_fut in channel_futs {
+        output_channel(channel_fut.await.unwrap());
     }
+    println!("after loop");
 }
 
-async fn get_channel() -> Result<Channel, Box<dyn Error>> {
-    let content = reqwest::get("https://www.nasa.gov/rss/dyn/breaking_news.rss")
-        .await?
-        .bytes()
-        .await?;
+async fn get_channel(feed_url: String) -> Result<Channel, Error> {
+    println!("about to start with {}", feed_url);
+    let content = reqwest::get(&feed_url).await?.bytes().await?;
+    println!("done with {}", feed_url);
+
     let channel = Channel::read_from(&content[..])?;
     Ok(channel)
+}
+
+pub fn output_channel(channel: Channel) {
+    println!("Channel: {}", channel.title);
 }
