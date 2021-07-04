@@ -8,14 +8,18 @@ pub async fn main() {
         "https://rss.art19.com/apology-line".to_string(),
     ];
 
-    let channel_futs: Vec<_> = feed_urls
-        .iter()
-        .map(|feed_url| get_channel(feed_url.clone()))
+    let handles: Vec<_> = feed_urls
+        .into_iter()
+        .map(|feed_url| tokio::spawn(get_channel(feed_url)))
         .collect();
 
-    for channel_fut in channel_futs {
-        output_channel(channel_fut.await.unwrap());
+    for handle in handles {
+        match handle.await {
+            Err(e) => panic!("Fetching feed: {}", e),
+            Ok(_) => println!("success"),
+        }
     }
+
     println!("after loop");
 }
 
