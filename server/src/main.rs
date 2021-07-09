@@ -2,11 +2,17 @@ use anyhow::Error;
 use rss::Channel;
 use tokio::sync::mpsc;
 
+#[macro_use]
+extern crate log;
+
 #[tokio::main]
 pub async fn main() {
+    env_logger::init();
+
     let feed_urls = vec![
         "https://www.nasa.gov/rss/dyn/breaking_news.rss".to_string(),
         "https://rss.art19.com/apology-line".to_string(),
+        "https://example.com/bad".to_string(),
     ];
 
     let (tx, mut rx) = mpsc::channel::<Channel>(6);
@@ -21,26 +27,25 @@ pub async fn main() {
 
     for handle in handles {
         match handle.await {
-            Err(e) => eprintln!("Fetching feed: {}", e),
-            Ok(_) => println!("success"),
+            Err(e) => error!("failed completing fetch task: {}", e),
+            Ok(res) => match res {
+                Err(e) => error!("error fetching feed: {}", e),
+                Ok(feed_url) => info!("feed fetched: {}", feed_url),
+            },
         }
     }
 
     while let Some(channel) = rx.recv().await {
         output_channel(channel);
     }
-
-    println!("after loop");
 }
 
-async fn get_channel(feed_url: String, tx: mpsc::Sender<Channel>) -> Result<(), Error> {
-    println!("about to start with {}", feed_url);
+async fn get_channel(feed_url: String, tx: mpsc::Sender<Channel>) -> Result<String, Error> {
     let content = reqwest::get(&feed_url).await?.bytes().await?;
-    println!("done with {}", feed_url);
 
     let channel = Channel::read_from(&content[..])?;
     tx.send(channel).await?;
-    Ok(())
+    Ok(feed_url)
 }
 
 pub fn output_channel(channel: Channel) {
