@@ -1,9 +1,10 @@
-use anyhow::Error;
 use rss::Channel;
 use tokio::sync::mpsc;
 
 #[macro_use]
 extern crate log;
+
+mod fetcher;
 
 #[tokio::main]
 pub async fn main() {
@@ -14,38 +15,16 @@ pub async fn main() {
         "https://rss.art19.com/apology-line".to_string(),
         "https://example.com/bad".to_string(),
     ];
-
     let (tx, mut rx) = mpsc::channel::<Channel>(6);
 
-    let handles: Vec<_> = feed_urls
-        .into_iter()
-        .map(|feed_url| tokio::spawn(get_channel(feed_url, tx.clone())))
-        .collect();
-    // It's not clear to me why this isn't dropped by Rust, since it's no longer used beyond this
-    // point. But if I don't drop this, rx never closes.
-    drop(tx);
-
-    for handle in handles {
-        match handle.await {
-            Err(e) => error!("failed completing fetch task: {}", e),
-            Ok(res) => match res {
-                Err(e) => error!("error fetching feed: {}", e),
-                Ok(feed_url) => info!("feed fetched: {}", feed_url),
-            },
+    let fetching = fetcher::fetch_all(feed_urls, tx);
+    let outputting = async {
+        while let Some(channel) = rx.recv().await {
+            output_channel(channel);
         }
-    }
+    };
 
-    while let Some(channel) = rx.recv().await {
-        output_channel(channel);
-    }
-}
-
-async fn get_channel(feed_url: String, tx: mpsc::Sender<Channel>) -> Result<String, Error> {
-    let content = reqwest::get(&feed_url).await?.bytes().await?;
-
-    let channel = Channel::read_from(&content[..])?;
-    tx.send(channel).await?;
-    Ok(feed_url)
+    tokio::join!(fetching, outputting);
 }
 
 pub fn output_channel(channel: Channel) {
