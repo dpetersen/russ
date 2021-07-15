@@ -16,7 +16,7 @@ pub async fn cancellable_periodic_fetch(
             bail!("fetcher has unexpectely quit");
         },
         _ = quit => {
-            info!("asked to quit fetching gracefully");
+            debug!("asked to quit fetching gracefully");
             Ok(())
         },
     }
