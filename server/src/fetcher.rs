@@ -1,11 +1,45 @@
-use anyhow::Error;
+use anyhow::{bail, Error};
 use rss::Channel;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::{self, Duration};
 
-pub async fn fetch_all(
+const POLL_INTERVAL_SECONDS: u64 = 5;
+
+pub async fn cancellable_periodic_fetch(
     feed_urls: Vec<String>,
     channels: mpsc::Sender<Channel>,
     errors: mpsc::Sender<Error>,
+    quit: oneshot::Receiver<()>,
+) -> Result<(), Error> {
+    tokio::select! {
+        _ = periodically_fetch(feed_urls, channels, errors) => {
+            bail!("fetcher has unexpectely quit");
+        },
+        _ = quit => {
+            info!("asked to quit fetching gracefully");
+            Ok(())
+        },
+    }
+}
+
+async fn periodically_fetch(
+    feed_urls: Vec<String>,
+    channels: mpsc::Sender<Channel>,
+    errors: mpsc::Sender<Error>,
+) {
+    let mut timer = time::interval(Duration::from_secs(POLL_INTERVAL_SECONDS));
+    timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+    loop {
+        timer.tick().await;
+        fetch_all(feed_urls.clone(), &channels, &errors).await;
+    }
+}
+
+pub async fn fetch_all(
+    feed_urls: Vec<String>,
+    channels: &mpsc::Sender<Channel>,
+    errors: &mpsc::Sender<Error>,
 ) {
     let handles: Vec<_> = feed_urls
         .into_iter()
@@ -80,14 +114,23 @@ mod tests {
 
         let (channel_tx, mut channel_rx) = mpsc::channel::<Channel>(6);
         let (error_tx, mut error_rx) = mpsc::channel::<Error>(6);
-        let fetching = fetch_all(
+        let (quit_tx, quit_rx) = oneshot::channel();
+        let fetching = cancellable_periodic_fetch(
             vec![
                 format!("{}/feed", &mock_server.uri()),
                 format!("{}/bad", &mock_server.uri()),
             ],
             channel_tx,
             error_tx,
+            quit_rx,
         );
+        let waiter = async {
+            // Not in love with this sleep. I should try and have something that triggers when both
+            // endpoints have been hit, but I'll bet that will be tough with lifetimes... But hey,
+            // at least I'm testing graceful termination.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            quit_tx.send(()).unwrap();
+        };
 
         let mut channels: Vec<Channel> = Vec::new();
         let reading_channels = async {
@@ -101,7 +144,9 @@ mod tests {
                 errors.push(error);
             }
         };
-        tokio::join!(fetching, reading_channels, reading_errors);
+        let (fetching_result, _, _, _) =
+            tokio::join!(fetching, reading_channels, reading_errors, waiter);
+        assert!(fetching_result.is_ok());
 
         assert_eq!(1, channels.len());
         assert_eq!("NASA Breaking News", channels.first().unwrap().title);
