@@ -128,7 +128,7 @@ mod tests {
             // Not in love with this sleep. I should try and have something that triggers when both
             // endpoints have been hit, but I'll bet that will be tough with lifetimes... But hey,
             // at least I'm testing graceful termination.
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
             quit_tx.send(()).unwrap();
         };
 

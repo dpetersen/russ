@@ -50,7 +50,7 @@ pub async fn main() {
     let (fetching_result, _, _) = tokio::join!(fetching, outputting_channels, outputting_errors);
     match fetching_result {
         Err(e) => warn!("problem gracefully shutting down fetcher: {}", e),
-        Ok(()) => info!("successfully quit fetching gracefully"),
+        Ok(()) => info!("gracefully quit fetching"),
     }
 }
 
