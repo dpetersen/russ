@@ -35,8 +35,11 @@ pub async fn main() {
         };
     });
 
-    let fetching =
-        fetcher::cancellable_periodic_fetch(feed_urls, feed_channel_tx, fetch_error_tx, quit_rx);
+    let fetching = fetcher::cancellable_periodic_fetch(
+        feed_urls,
+        fetcher::Results::new(feed_channel_tx, fetch_error_tx),
+        quit_rx,
+    );
     let outputting_channels = async {
         while let Some(channel) = feed_channel_rx.recv().await {
             output_channel(channel);
@@ -55,6 +58,6 @@ pub async fn main() {
     }
 }
 
-pub fn output_channel(channel: Channel) {
+fn output_channel(channel: Channel) {
     println!("Channel: {}", channel.title);
 }

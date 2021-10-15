@@ -5,14 +5,26 @@ use tokio::time::{self, Duration};
 
 const POLL_INTERVAL_SECONDS: u64 = 5;
 
+/// A tuple of channels for the fetcher to report back both success and failure in fetching the
+/// individual feeds' contents.
+pub struct Results(mpsc::Sender<Channel>, mpsc::Sender<Error>);
+
+impl Results {
+    pub fn new(feed_channels: mpsc::Sender<Channel>, fetch_errors: mpsc::Sender<Error>) -> Results {
+        Results(feed_channels, fetch_errors)
+    }
+}
+
+/// Passed a list of valid feed URLs, run a periodic fetch indefinitely until the quit signal is
+/// received. All results, successful or not, will be passed through the channels in the Results.
+/// No amount of failure will stop the fetcher.
 pub async fn cancellable_periodic_fetch(
     feed_urls: Vec<String>,
-    channels: mpsc::Sender<Channel>,
-    errors: mpsc::Sender<Error>,
+    reporter: Results,
     quit: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
     tokio::select! {
-        _ = periodically_fetch(feed_urls, channels, errors) => {
+        _ = periodically_fetch(feed_urls, reporter) => {
             bail!("fetcher has unexpectely quit");
         },
         _ = quit => {
@@ -22,25 +34,19 @@ pub async fn cancellable_periodic_fetch(
     }
 }
 
-async fn periodically_fetch(
-    feed_urls: Vec<String>,
-    channels: mpsc::Sender<Channel>,
-    errors: mpsc::Sender<Error>,
-) {
+async fn periodically_fetch(feed_urls: Vec<String>, reporter: Results) {
     let mut timer = time::interval(Duration::from_secs(POLL_INTERVAL_SECONDS));
     timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
     loop {
         timer.tick().await;
-        fetch_all(feed_urls.clone(), &channels, &errors).await;
+        fetch_all(feed_urls.clone(), &reporter).await;
     }
 }
 
-pub async fn fetch_all(
-    feed_urls: Vec<String>,
-    channels: &mpsc::Sender<Channel>,
-    errors: &mpsc::Sender<Error>,
-) {
+async fn fetch_all(feed_urls: Vec<String>, reporter: &Results) {
+    let channels = &reporter.0;
+    let errors = &reporter.1;
     let handles: Vec<_> = feed_urls
         .into_iter()
         .map(|feed_url| tokio::spawn(get_channel(feed_url, channels.clone())))
@@ -120,8 +126,7 @@ mod tests {
                 format!("{}/feed", &mock_server.uri()),
                 format!("{}/bad", &mock_server.uri()),
             ],
-            feed_channel_tx,
-            fetch_error_tx,
+            Results(feed_channel_tx, fetch_error_tx),
             quit_rx,
         );
         let waiter = async {
