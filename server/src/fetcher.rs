@@ -112,16 +112,16 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let (channel_tx, mut channel_rx) = mpsc::channel::<Channel>(6);
-        let (error_tx, mut error_rx) = mpsc::channel::<Error>(6);
+        let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<Channel>(6);
+        let (fetch_error_tx, mut fetch_error_rx) = mpsc::channel::<Error>(6);
         let (quit_tx, quit_rx) = oneshot::channel();
         let fetching = cancellable_periodic_fetch(
             vec![
                 format!("{}/feed", &mock_server.uri()),
                 format!("{}/bad", &mock_server.uri()),
             ],
-            channel_tx,
-            error_tx,
+            feed_channel_tx,
+            fetch_error_tx,
             quit_rx,
         );
         let waiter = async {
@@ -134,13 +134,13 @@ mod tests {
 
         let mut channels: Vec<Channel> = Vec::new();
         let reading_channels = async {
-            while let Some(channel) = channel_rx.recv().await {
+            while let Some(channel) = feed_channel_rx.recv().await {
                 channels.push(channel);
             }
         };
         let mut errors: Vec<Error> = Vec::new();
         let reading_errors = async {
-            while let Some(error) = error_rx.recv().await {
+            while let Some(error) = fetch_error_rx.recv().await {
                 errors.push(error);
             }
         };

@@ -17,8 +17,8 @@ pub async fn main() {
         "https://rss.art19.com/apology-line".to_string(),
         "https://example.com/bad".to_string(),
     ];
-    let (channel_tx, mut channel_rx) = mpsc::channel::<Channel>(6);
-    let (error_tx, mut error_rx) = mpsc::channel::<Error>(6);
+    let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<Channel>(6);
+    let (fetch_error_tx, mut fetch_error_rx) = mpsc::channel::<Error>(6);
     let (quit_tx, quit_rx) = oneshot::channel();
 
     let mut signals = match Signals::new(&[SIGINT, SIGTERM]) {
@@ -35,14 +35,15 @@ pub async fn main() {
         };
     });
 
-    let fetching = fetcher::cancellable_periodic_fetch(feed_urls, channel_tx, error_tx, quit_rx);
+    let fetching =
+        fetcher::cancellable_periodic_fetch(feed_urls, feed_channel_tx, fetch_error_tx, quit_rx);
     let outputting_channels = async {
-        while let Some(channel) = channel_rx.recv().await {
+        while let Some(channel) = feed_channel_rx.recv().await {
             output_channel(channel);
         }
     };
     let outputting_errors = async {
-        while let Some(error) = error_rx.recv().await {
+        while let Some(error) = fetch_error_rx.recv().await {
             error!("error fetching feed: {}", error);
         }
     };
