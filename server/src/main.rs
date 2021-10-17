@@ -7,11 +7,13 @@ use tokio::sync::{mpsc, oneshot};
 extern crate log;
 
 mod fetcher;
+mod persistence;
 
 #[tokio::main]
 pub async fn main() {
     env_logger::init();
 
+    // TODO pull this from the config
     let feed_urls = vec![
         "https://www.nasa.gov/rss/dyn/breaking_news.rss".to_string(),
         "https://rss.art19.com/apology-line".to_string(),
@@ -20,6 +22,15 @@ pub async fn main() {
     let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<Channel>(6);
     let (fetch_error_tx, mut fetch_error_rx) = mpsc::channel::<Error>(6);
     let (quit_tx, quit_rx) = oneshot::channel();
+    // TODO path somewhere in an appropriate home path
+    let mut database =
+        match persistence::FileDatabase::new_for_path(std::path::Path::new("database.json")) {
+            Ok(d) => d,
+            Err(e) => {
+                error!("error opening database: {}", e);
+                std::process::exit(1);
+            }
+        };
 
     let mut signals = match Signals::new(&[SIGINT, SIGTERM]) {
         Ok(s) => s,
@@ -42,7 +53,9 @@ pub async fn main() {
     );
     let outputting_channels = async {
         while let Some(channel) = feed_channel_rx.recv().await {
-            output_channel(channel);
+            if let Err(e) = database.persist_channel(&channel) {
+                error!("persisting channel '{}': {}", channel.title, e);
+            }
         }
     };
     let outputting_errors = async {
@@ -56,8 +69,4 @@ pub async fn main() {
         Err(e) => warn!("problem gracefully shutting down fetcher: {}", e),
         Ok(()) => info!("gracefully quit fetching"),
     }
-}
-
-fn output_channel(channel: Channel) {
-    println!("Channel: {}", channel.title);
 }

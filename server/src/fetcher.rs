@@ -68,6 +68,7 @@ async fn fetch_all(feed_urls: Vec<String>, reporter: &Results) {
 }
 
 async fn get_channel(feed_url: String, tx: mpsc::Sender<Channel>) -> Result<String, Error> {
+    // TODO save the etags in memory so you can use them and be a good HTTP citizen
     let content = reqwest::get(&feed_url).await?.bytes().await?;
 
     let channel = Channel::read_from(&content[..])?;
