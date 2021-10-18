@@ -65,7 +65,7 @@ impl FileDatabase {
         let mut writer = BufWriter::new(&self.file);
         serde_json::to_writer(&mut writer, &database).context("serializing into file writer")?;
         writer.flush().context("flushing file writer")?;
-        self.file.sync_all()?;
+        self.file.sync_all().context("syncing file metadata")?;
         self.has_content = true;
         Ok(())
     }
