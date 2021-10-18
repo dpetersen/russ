@@ -7,10 +7,13 @@ const POLL_INTERVAL_SECONDS: u64 = 5;
 
 /// A tuple of channels for the fetcher to report back both success and failure in fetching the
 /// individual feeds' contents.
-pub struct Results(mpsc::Sender<Channel>, mpsc::Sender<Error>);
+pub struct Results(mpsc::Sender<(String, Channel)>, mpsc::Sender<Error>);
 
 impl Results {
-    pub fn new(feed_channels: mpsc::Sender<Channel>, fetch_errors: mpsc::Sender<Error>) -> Results {
+    pub fn new(
+        feed_channels: mpsc::Sender<(String, Channel)>,
+        fetch_errors: mpsc::Sender<Error>,
+    ) -> Results {
         Results(feed_channels, fetch_errors)
     }
 }
@@ -67,12 +70,15 @@ async fn fetch_all(feed_urls: Vec<String>, reporter: &Results) {
     }
 }
 
-async fn get_channel(feed_url: String, tx: mpsc::Sender<Channel>) -> Result<String, Error> {
+async fn get_channel(
+    feed_url: String,
+    tx: mpsc::Sender<(String, Channel)>,
+) -> Result<String, Error> {
     // TODO save the etags in memory so you can use them and be a good HTTP citizen
     let content = reqwest::get(&feed_url).await?.bytes().await?;
 
     let channel = Channel::read_from(&content[..])?;
-    tx.send(channel).await?;
+    tx.send((feed_url.clone(), channel)).await?;
     Ok(feed_url)
 }
 
@@ -119,7 +125,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<Channel>(6);
+        let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<(String, Channel)>(6);
         let (fetch_error_tx, mut fetch_error_rx) = mpsc::channel::<Error>(6);
         let (quit_tx, quit_rx) = oneshot::channel();
         let fetching = cancellable_periodic_fetch(
@@ -138,7 +144,7 @@ mod tests {
             quit_tx.send(()).unwrap();
         };
 
-        let mut channels: Vec<Channel> = Vec::new();
+        let mut channels: Vec<(String, Channel)> = Vec::new();
         let reading_channels = async {
             while let Some(channel) = feed_channel_rx.recv().await {
                 channels.push(channel);
@@ -155,7 +161,11 @@ mod tests {
         assert!(fetching_result.is_ok());
 
         assert_eq!(1, channels.len());
-        assert_eq!("NASA Breaking News", channels.first().unwrap().title);
+        assert_eq!(
+            format!("{}/feed", &mock_server.uri()),
+            channels.first().unwrap().0
+        );
+        assert_eq!("NASA Breaking News", channels.first().unwrap().1.title);
 
         assert_eq!(1, errors.len());
         assert_eq!(

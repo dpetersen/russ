@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use rss::Channel as RSSChannel;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
@@ -12,7 +13,7 @@ pub struct FileDatabase {
     file: std::fs::File,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
     title: String,
 }
@@ -27,7 +28,7 @@ impl From<&RSSChannel> for Channel {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Database {
-    channels: Vec<Channel>,
+    channels: HashMap<String, Channel>,
 }
 
 impl FileDatabase {
@@ -45,14 +46,16 @@ impl FileDatabase {
         })
     }
 
-    pub fn persist_channel(&mut self, channel: &RSSChannel) -> Result<()> {
+    pub fn persist_channel(&mut self, url: String, channel: &RSSChannel) -> Result<()> {
         let mut database = if self.has_content {
             self.load_database().context("reloading database")?
         } else {
-            Database { channels: vec![] }
+            Database {
+                channels: HashMap::new(),
+            }
         };
 
-        database.channels.push(channel.into());
+        database.channels.insert(url, channel.into());
         self.file
             .seek(SeekFrom::Start(0))
             .context("rewinding database file")?;
@@ -66,7 +69,11 @@ impl FileDatabase {
 
     pub fn get_channels(&mut self) -> Result<Vec<Channel>> {
         let database = self.load_database()?;
-        Ok(database.channels)
+        Ok(database
+            .channels
+            .values()
+            .cloned()
+            .collect::<Vec<Channel>>())
     }
 
     fn load_database(&mut self) -> Result<Database> {
@@ -95,7 +102,7 @@ mod tests {
                 ..Default::default()
             };
             database
-                .persist_channel(&rss_channel)
+                .persist_channel("https://example.com/feed".to_string(), &rss_channel)
                 .context("initial persistence")?;
         }
 
@@ -105,7 +112,10 @@ mod tests {
             ..Default::default()
         };
         database
-            .persist_channel(&rss_channel)
+            .persist_channel(
+                "https://example.com/feed2".to_string().to_string(),
+                &rss_channel,
+            )
             .context("second persistence")?;
 
         let channels = database.get_channels().context("loading channels")?;
@@ -121,17 +131,17 @@ mod tests {
     fn test_persist_channel_replaces_existing() -> Result<()> {
         let dir = tempdir()?.into_path().join("test.json");
         let mut database = FileDatabase::new_for_path(&dir).context("loading initial database")?;
-        for _ in 0..=1 {
+        for i in 1..=2 {
             let rss_channel = RSSChannel {
-                title: "Test Channel".to_string(),
+                title: format!("Test Channel {}", i),
                 ..Default::default()
             };
-            database.persist_channel(&rss_channel)?;
+            database.persist_channel("https://example.com/feed".to_string(), &rss_channel)?;
         }
 
         let channels = database.get_channels().context("loading channels")?;
-        todo!("here's your failure, need to make sure you are overwriting existing channels. Also, title shouldn't be the 'primary key'");
         assert_eq!(1, channels.len());
+        assert_eq!("Test Channel 2", channels.first().unwrap().title);
 
         Ok(())
     }

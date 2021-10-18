@@ -19,7 +19,7 @@ pub async fn main() {
         "https://rss.art19.com/apology-line".to_string(),
         "https://example.com/bad".to_string(),
     ];
-    let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<Channel>(6);
+    let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<(String, Channel)>(6);
     let (fetch_error_tx, mut fetch_error_rx) = mpsc::channel::<Error>(6);
     let (quit_tx, quit_rx) = oneshot::channel();
     // TODO path somewhere in an appropriate home path
@@ -52,8 +52,8 @@ pub async fn main() {
         quit_rx,
     );
     let outputting_channels = async {
-        while let Some(channel) = feed_channel_rx.recv().await {
-            if let Err(e) = database.persist_channel(&channel) {
+        while let Some((feed_url, channel)) = feed_channel_rx.recv().await {
+            if let Err(e) = database.persist_channel(feed_url, &channel) {
                 error!("persisting channel '{}': {}", channel.title, e);
             }
         }
