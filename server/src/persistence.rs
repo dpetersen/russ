@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rss::Channel as RSSChannel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,16 +34,19 @@ struct Database {
 impl FileDatabase {
     pub fn new_for_path(path: &std::path::Path) -> Result<FileDatabase> {
         let exists = path.exists();
-        // TODO try and exclusivly lock this
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .open(path)?;
-        Ok(FileDatabase {
-            file,
-            has_content: exists,
-        })
+        match fcntl::lock_file(&file, None, Some(fcntl::FcntlLockType::Write)) {
+            Ok(true) => Ok(FileDatabase {
+                file,
+                has_content: exists,
+            }),
+            Ok(false) => bail!("unable to acquire database file write lock. Is another Russ process already running?"),
+            Err(e) => bail!("error locking database file: {}", e),
+        }
     }
 
     pub fn persist_channel(&mut self, url: String, channel: &RSSChannel) -> Result<()> {
