@@ -14,6 +14,8 @@ signal-hook = "0.3.9"
 fcntl = "0.1"
 serde = "1.0.130"
 serde_json = "1.0.68"
+dropshot = "0.5.1"
+schemars = "0.8.6"
 
 [dev-dependencies]
 wiremock = "0.5"

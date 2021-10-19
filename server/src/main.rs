@@ -8,6 +8,7 @@ extern crate log;
 
 mod fetcher;
 mod persistence;
+mod server;
 
 #[tokio::main]
 pub async fn main() {
@@ -21,7 +22,7 @@ pub async fn main() {
     ];
     let (feed_channel_tx, mut feed_channel_rx) = mpsc::channel::<(String, Channel)>(6);
     let (fetch_error_tx, mut fetch_error_rx) = mpsc::channel::<Error>(6);
-    let (quit_tx, quit_rx) = oneshot::channel();
+    let (fetcher_quit_tx, fetcher_quit_rx) = oneshot::channel();
     // TODO path somewhere in an appropriate home path
     let mut database =
         match persistence::FileDatabase::new_for_path(std::path::Path::new("database.json")) {
@@ -41,15 +42,22 @@ pub async fn main() {
             debug!("received signal {:?}", sig);
             break;
         }
-        if let Err(_) = quit_tx.send(()) {
+        if let Err(_) = fetcher_quit_tx.send(()) {
             error!("problem sending quit signal to the refresher");
         };
     });
 
+    let serving = server::cancellable_server();
+    tokio::spawn(async move {
+        if let Err(e) = serving.await {
+            error!("problem running server: {}", e);
+            std::process::exit(1);
+        }
+    });
     let fetching = fetcher::cancellable_periodic_fetch(
         feed_urls,
         fetcher::Results::new(feed_channel_tx, fetch_error_tx),
-        quit_rx,
+        fetcher_quit_rx,
     );
     let outputting_channels = async {
         while let Some((feed_url, channel)) = feed_channel_rx.recv().await {
