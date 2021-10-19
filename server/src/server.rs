@@ -1,3 +1,4 @@
+use crate::persistence::{Channel, FileDatabase};
 use anyhow::{bail, Context, Error};
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, ConfigLoggingLevel, HttpError,
@@ -5,9 +6,9 @@ use dropshot::{
 };
 use schemars::JsonSchema;
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-pub async fn cancellable_server() -> Result<(), Error> {
+pub async fn cancellable_server(database: Arc<Mutex<FileDatabase>>) -> Result<(), Error> {
     let log = ConfigLogging::StderrTerminal {
         level: ConfigLoggingLevel::Debug,
     }
@@ -23,7 +24,7 @@ pub async fn cancellable_server() -> Result<(), Error> {
             request_body_max_bytes: 10240,
         },
         api,
-        (),
+        RussContext { database },
         &log,
     )
     .map_err(|error| format!("failed to start server: {}", error))
@@ -50,15 +51,33 @@ pub async fn cancellable_server() -> Result<(), Error> {
     Ok(())
 }
 
+struct RussContext {
+    database: Arc<Mutex<FileDatabase>>,
+}
+
 #[derive(Serialize, JsonSchema)]
-struct ChannelsList {}
+struct ChannelsList {
+    channels: Vec<Channel>,
+}
 
 #[endpoint {
     method = GET,
     path = "/channels",
 }]
 async fn get_channels(
-    rqctx: Arc<RequestContext<()>>,
+    rqctx: Arc<RequestContext<RussContext>>,
 ) -> Result<HttpResponseOk<ChannelsList>, HttpError> {
-    Ok(HttpResponseOk(ChannelsList {}))
+    match rqctx.context().database.lock() {
+        Err(e) => Err(HttpError::for_internal_error(format!(
+            "locking database: {}",
+            e
+        ))),
+        Ok(mut d) => match d.get_channels() {
+            Err(e) => Err(HttpError::for_internal_error(format!(
+                "getting channels: {}",
+                e
+            ))),
+            Ok(channels) => Ok(HttpResponseOk(ChannelsList { channels })),
+        },
+    }
 }

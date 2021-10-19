@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use rss::Channel as RSSChannel;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -13,7 +14,10 @@ pub struct FileDatabase {
     file: std::fs::File,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// TODO not feeling good about leaking the JsonSchema requirement of dropshot into this part of the
+// codebase. But I'm also not interested in having yet another Channel type that I have to convert
+// to. Think about this.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Channel {
     title: String,
 }

@@ -1,6 +1,7 @@
 use anyhow::Error;
 use rss::Channel;
 use signal_hook::{consts::SIGINT, consts::SIGTERM, iterator::Signals};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
 #[macro_use]
@@ -24,9 +25,9 @@ pub async fn main() {
     let (fetch_error_tx, mut fetch_error_rx) = mpsc::channel::<Error>(6);
     let (fetcher_quit_tx, fetcher_quit_rx) = oneshot::channel();
     // TODO path somewhere in an appropriate home path
-    let mut database =
+    let database =
         match persistence::FileDatabase::new_for_path(std::path::Path::new("database.json")) {
-            Ok(d) => d,
+            Ok(d) => Arc::new(Mutex::new(d)),
             Err(e) => {
                 error!("error opening database: {}", e);
                 std::process::exit(1);
@@ -47,7 +48,7 @@ pub async fn main() {
         };
     });
 
-    let serving = server::cancellable_server();
+    let serving = server::cancellable_server(database.clone());
     tokio::spawn(async move {
         if let Err(e) = serving.await {
             error!("problem running server: {}", e);
@@ -59,9 +60,14 @@ pub async fn main() {
         fetcher::Results::new(feed_channel_tx, fetch_error_tx),
         fetcher_quit_rx,
     );
+    let feed_receive_database = database.clone();
     let outputting_channels = async {
         while let Some((feed_url, channel)) = feed_channel_rx.recv().await {
-            if let Err(e) = database.persist_channel(feed_url, &channel) {
+            if let Err(e) = feed_receive_database
+                .lock()
+                .unwrap() // TODO nope
+                .persist_channel(feed_url, &channel)
+            {
                 error!("persisting channel '{}': {}", channel.title, e);
             }
         }
